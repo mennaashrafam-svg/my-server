@@ -1,106 +1,116 @@
 const express = require("express");
-const Database = require("better-sqlite3");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
+const { Pool } = require("pg");
 
 const app = express();
-const db = new Database("mydata.db");
-
-// جداول قاعدة البيانات
-db.exec(`
-  CREATE TABLE IF NOT EXISTS conversations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
-    message TEXT,
-    platform TEXT,
-    date TEXT
-  )
-`);
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS agents (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
-    role TEXT
-  )
-`);
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT UNIQUE,
-    password TEXT,
-    name TEXT
-  )
-`);
-
 app.use(express.json());
 
-// التحقق من الـ token
+const db = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
+
+// عمل الجداول لو مش موجودة
+async function setupDB() {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS conversations (
+      id SERIAL PRIMARY KEY,
+      name TEXT,
+      message TEXT,
+      platform TEXT,
+      date TEXT
+    )
+  `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS agents (
+      id SERIAL PRIMARY KEY,
+      name TEXT,
+      role TEXT
+    )
+  `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      email TEXT UNIQUE,
+      password TEXT,
+      name TEXT
+    )
+  `);
+}
+setupDB();
+
+const JWT_SECRET = process.env.JWT_SECRET || "secret-key";
+
 const requireAuth = (req, res, next) => {
   const token = req.headers.authorization?.split(" ")[1];
   if (!token) return res.status(401).json({ message: "محتاج تسجل دخول" });
   try {
-    req.user = jwt.verify(token, "secret-key");
+    req.user = jwt.verify(token, JWT_SECRET);
     next();
   } catch {
     res.status(401).json({ message: "الـ token غلط" });
   }
 };
 
-// المحادثات
-app.get("/api/conversations", requireAuth, (req, res) => {
-  const conversations = db.prepare("SELECT * FROM conversations").all();
-  res.json(conversations);
+app.get("/", (req, res) => {
+  res.json({ message: "السيرفر شغال بنجاح" });
 });
 
-app.post("/api/conversations", requireAuth, (req, res) => {
+app.get("/api/conversations", requireAuth, async (req, res) => {
+  const result = await db.query("SELECT * FROM conversations ORDER BY id DESC");
+  res.json(result.rows);
+});
+
+app.post("/api/conversations", requireAuth, async (req, res) => {
   const { name, message, platform, date } = req.body;
-  const result = db.prepare(
-    "INSERT INTO conversations (name, message, platform, date) VALUES (?, ?, ?, ?)"
-  ).run(name, message, platform, date);
-  res.json({ id: result.lastInsertRowid, name, message, platform, date });
+  const result = await db.query(
+    "INSERT INTO conversations (name, message, platform, date) VALUES ($1, $2, $3, $4) RETURNING *",
+    [name, message, platform, date]
+  );
+  res.json(result.rows[0]);
 });
 
-// الموظفين
-app.get("/api/agents", requireAuth, (req, res) => {
-  const agents = db.prepare("SELECT * FROM agents").all();
-  res.json(agents);
+app.get("/api/agents", requireAuth, async (req, res) => {
+  const result = await db.query("SELECT * FROM agents");
+  res.json(result.rows);
 });
 
-app.post("/api/agents", requireAuth, (req, res) => {
+app.post("/api/agents", requireAuth, async (req, res) => {
   const { name, role } = req.body;
-  const result = db.prepare(
-    "INSERT INTO agents (name, role) VALUES (?, ?)"
-  ).run(name, role);
-  res.json({ id: result.lastInsertRowid, name, role });
+  const result = await db.query(
+    "INSERT INTO agents (name, role) VALUES ($1, $2) RETURNING *",
+    [name, role]
+  );
+  res.json(result.rows[0]);
 });
 
-// تسجيل مستخدم جديد
 app.post("/api/register", async (req, res) => {
   const { email, password, name } = req.body;
   const hashed = await bcrypt.hash(password, 10);
   try {
-    const result = db.prepare(
-      "INSERT INTO users (email, password, name) VALUES (?, ?, ?)"
-    ).run(email, hashed, name);
-    res.json({ message: "تم التسجيل", id: result.lastInsertRowid });
+    const result = await db.query(
+      "INSERT INTO users (email, password, name) VALUES ($1, $2, $3) RETURNING *",
+      [email, hashed, name]
+    );
+    res.json({ message: "تم التسجيل", id: result.rows[0].id });
   } catch {
     res.status(400).json({ message: "الإيميل موجود بالفعل" });
   }
 });
 
-// تسجيل الدخول
 app.post("/api/login", async (req, res) => {
   const { email, password } = req.body;
-  const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
+  const result = await db.query("SELECT * FROM users WHERE email = $1", [email]);
+  const user = result.rows[0];
   if (!user) return res.status(401).json({ message: "بيانات غلط" });
   const valid = await bcrypt.compare(password, user.password);
   if (!valid) return res.status(401).json({ message: "بيانات غلط" });
-  const token = jwt.sign({ id: user.id, email: user.email }, "secret-key", { expiresIn: "7d" });
+  const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: "7d" });
   res.json({ token, name: user.name });
 });
 
-app.listen(3000, () => {
-  console.log("السيرفر شغال على http://localhost:3000");
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log("السيرفر شغال على البورت " + PORT);
 });
