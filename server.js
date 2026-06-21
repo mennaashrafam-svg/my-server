@@ -118,6 +118,45 @@ app.post("/api/login", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
+// Webhook للتحقق من واتساب
+app.get("/webhook", (req, res) => {
+  const verify_token = process.env.WEBHOOK_VERIFY_TOKEN || "mytoken123";
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+  if (mode === "subscribe" && token === verify_token) {
+    res.status(200).send(challenge);
+  } else {
+    res.sendStatus(403);
+  }
+});
+
+// استقبال الرسائل من واتساب وإنستجرام
+app.post("/webhook", async (req, res) => {
+  const body = req.body;
+  if (body.object) {
+    const entry = body.entry?.[0];
+    const changes = entry?.changes?.[0];
+    const value = changes?.value;
+    const messages = value?.messages;
+
+    if (messages && messages.length > 0) {
+      const msg = messages[0];
+      const platform = body.object === "whatsapp_business_account" ? "whatsapp" : "instagram";
+      const name = value?.contacts?.[0]?.profile?.name || "عميل";
+      const message = msg.text?.body || msg.type || "";
+      const date = new Date().toISOString().split("T")[0];
+
+      await db.query(
+        "INSERT INTO conversations (name, message, platform, date, user_id) VALUES ($1, $2, $3, $4, $5)",
+        [name, message, platform, date, 1]
+      );
+    }
+    res.sendStatus(200);
+  } else {
+    res.sendStatus(404);
+  }
+});
 app.listen(PORT, () => {
   console.log("السيرفر شغال على البورت " + PORT);
 });
