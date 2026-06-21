@@ -62,15 +62,18 @@ app.get("/", (req, res) => {
 });
 
 app.get("/api/conversations", requireAuth, async (req, res) => {
-  const result = await db.query("SELECT * FROM conversations ORDER BY id DESC");
+  const result = await db.query(
+    "SELECT * FROM conversations WHERE user_id = $1 ORDER BY id DESC",
+    [req.user.id]
+  );
   res.json(result.rows);
 });
 
 app.post("/api/conversations", requireAuth, async (req, res) => {
   const { name, message, platform, date } = req.body;
   const result = await db.query(
-    "INSERT INTO conversations (name, message, platform, date) VALUES ($1, $2, $3, $4) RETURNING *",
-    [name, message, platform, date]
+    "INSERT INTO conversations (name, message, platform, date, user_id) VALUES ($1, $2, $3, $4, $5) RETURNING *",
+    [name, message, platform, date, req.user.id]
   );
   res.json(result.rows[0]);
 });
