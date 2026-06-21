@@ -39,6 +39,10 @@ async function setupDB() {
   `);
 }
 setupDB();
+await db.query(`
+  ALTER TABLE conversations 
+  ADD COLUMN IF NOT EXISTS user_id INTEGER
+`);
 
 const JWT_SECRET = process.env.JWT_SECRET || "secret-key";
 
