@@ -4,6 +4,9 @@ const bcrypt = require("bcryptjs");
 const { Pool } = require("pg");
 
 const app = express();
+
+const cors = require("cors");
+app.use(cors());
 app.use(express.json());
 
 const db = new Pool({
