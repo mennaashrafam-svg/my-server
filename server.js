@@ -11,7 +11,6 @@ const db = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// عمل الجداول لو مش موجودة
 async function setupDB() {
   await db.query(`
     CREATE TABLE IF NOT EXISTS conversations (
@@ -19,7 +18,8 @@ async function setupDB() {
       name TEXT,
       message TEXT,
       platform TEXT,
-      date TEXT
+      date TEXT,
+      user_id INTEGER
     )
   `);
   await db.query(`
@@ -38,11 +38,8 @@ async function setupDB() {
     )
   `);
 }
-setupDB();
-await db.query(`
-  ALTER TABLE conversations 
-  ADD COLUMN IF NOT EXISTS user_id INTEGER
-`);
+
+setupDB().catch(console.error);
 
 const JWT_SECRET = process.env.JWT_SECRET || "secret-key";
 
