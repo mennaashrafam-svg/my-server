@@ -40,6 +40,17 @@ async function setupDB() {
       name TEXT
     )
   `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS platform_connections (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER,
+      platform TEXT,
+      access_token TEXT,
+      account_id TEXT,
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(user_id, platform)
+    )
+  `);
 }
 
 setupDB().catch(console.error);
@@ -117,8 +128,30 @@ app.post("/api/login", async (req, res) => {
   res.json({ token, name: user.name });
 });
 
-const PORT = process.env.PORT || 3000;
-// Webhook للتحقق من واتساب
+app.post("/api/settings/platforms", requireAuth, async (req, res) => {
+  const { platform, token, phoneId, accountId, pageId } = req.body;
+  try {
+    await db.query(
+      `INSERT INTO platform_connections (user_id, platform, access_token, account_id)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (user_id, platform) DO UPDATE 
+       SET access_token = $3, account_id = $4`,
+      [req.user.id, platform, token || phoneId, accountId || pageId]
+    );
+    res.json({ message: "تم الربط بنجاح" });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+app.get("/api/settings/platforms", requireAuth, async (req, res) => {
+  const result = await db.query(
+    "SELECT platform, account_id FROM platform_connections WHERE user_id = $1",
+    [req.user.id]
+  );
+  res.json(result.rows);
+});
+
 app.get("/webhook", (req, res) => {
   const verify_token = process.env.WEBHOOK_VERIFY_TOKEN || "mytoken123";
   const mode = req.query["hub.mode"];
@@ -131,7 +164,6 @@ app.get("/webhook", (req, res) => {
   }
 });
 
-// استقبال الرسائل من واتساب وإنستجرام
 app.post("/webhook", async (req, res) => {
   const body = req.body;
   if (body.object) {
@@ -157,6 +189,8 @@ app.post("/webhook", async (req, res) => {
     res.sendStatus(404);
   }
 });
+
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log("السيرفر شغال على البورت " + PORT);
 });
